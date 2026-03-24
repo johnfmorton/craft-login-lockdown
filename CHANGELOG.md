@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Non-admin users with plugin access can now view the blocked IPs page without getting a 403 error
+- CP nav item now hidden for users without plugin access permission
+
 ## [1.0.3] - 2026-02-04
 
 ### Fixed

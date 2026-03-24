@@ -101,6 +101,10 @@ class LoginLockdown extends Plugin
      */
     public function getCpNavItem(): ?array
     {
+        if (!Craft::$app->getUser()->checkPermission('accessPlugin-login-lockdown')) {
+            return null;
+        }
+
         $item = parent::getCpNavItem();
 
         if ($item) {

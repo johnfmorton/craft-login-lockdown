@@ -31,9 +31,7 @@ class BlockedIpsController extends Controller
      */
     public function beforeAction($action): bool
     {
-        // Require admin permission but allow access even when allowAdminChanges is false
-        // Managing blocked IPs is an operational task, not a configuration change
-        $this->requireAdmin(false);
+        $this->requirePermission('accessPlugin-login-lockdown');
         return parent::beforeAction($action);
     }
 
