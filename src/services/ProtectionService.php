@@ -30,6 +30,15 @@ use johnfmorton\loginlockdown\records\LoginAttemptRecord;
 class ProtectionService extends Component
 {
     /**
+     * @var int Minimum number of seconds between persisted attempts for an
+     * already-blocked IP. A blocked IP that keeps hitting the login endpoint
+     * would otherwise insert one attempt row (and re-save the block row) per
+     * request, letting an attacker flood the database. The 403 block is still
+     * enforced on every request — only the database writes are throttled.
+     */
+    private const BLOCKED_ATTEMPT_THROTTLE_SECONDS = 60;
+
+    /**
      * Record a failed login attempt
      *
      * @param string $ipAddress The IP address
@@ -224,6 +233,25 @@ class ProtectionService extends Component
     public function recordBlockedAttemptAndExtend(string $ipAddress, ?string $username = null, ?string $userAgent = null): void
     {
         $settings = LoginLockdown::$plugin->getSettings();
+
+        // Throttle writes: if an attempt for this IP was already recorded within
+        // the throttle window, skip persisting this one. This stops a blocked IP
+        // from flooding the attempts table (and repeatedly re-saving the block
+        // row) by hammering the login endpoint. The caller still returns a 403
+        // for every request regardless of whether this write happens.
+        $throttleStart = (new DateTime())
+            ->modify('-' . self::BLOCKED_ATTEMPT_THROTTLE_SECONDS . ' seconds')
+            ->format('Y-m-d H:i:s');
+
+        $recentlyRecorded = (new Query())
+            ->from(LoginAttemptRecord::tableName())
+            ->where(['ipAddress' => $ipAddress])
+            ->andWhere(['>=', 'dateAttempted', $throttleStart])
+            ->exists();
+
+        if ($recentlyRecorded) {
+            return;
+        }
 
         // Record the attempt
         $record = new LoginAttemptRecord();

@@ -25,6 +25,7 @@ use craft\web\UrlManager;
 use johnfmorton\loginlockdown\models\Settings;
 use johnfmorton\loginlockdown\services\NotificationService;
 use johnfmorton\loginlockdown\services\ProtectionService;
+use yii\base\Action;
 use yii\base\ActionEvent;
 use yii\base\Event;
 
@@ -180,12 +181,17 @@ class LoginLockdown extends Plugin
                 $isCpRequest = $request->getIsCpRequest();
                 $settings = $this->getSettings();
 
-                // Check if this is a front-end login attempt (only if setting enabled)
+                // Check if this is a front-end login attempt (only if setting enabled).
+                // Inspect the *resolved* action rather than only the `action` body
+                // param: Craft accepts the action via the body param, the query
+                // string, or the `/actions/users/login` path, and only the resolved
+                // action id is invariant across all of those forms. Trusting the body
+                // param alone let a blocked IP keep attempting front-end logins by
+                // switching to the path/query form.
                 $isFrontEndLogin = false;
                 if (!$isCpRequest && $request->getIsPost() && $settings->getProtectFrontEndLoginParsed()) {
-                    // Check if the action parameter targets users/login
-                    $action = $request->getBodyParam('action');
-                    if ($action === 'users/login') {
+                    $action = $event->action;
+                    if ($action instanceof Action && $action->getUniqueId() === 'users/login') {
                         $isFrontEndLogin = true;
                     }
                 }

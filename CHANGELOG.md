@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - **Fixed IP spoofing in client IP detection.** `ProtectionService::getClientIp()` previously trusted the `CF-Connecting-IP`, `X-Forwarded-For`, and `X-Real-IP` request headers unconditionally and used the left-most value, which is client-controlled. This let an attacker rotate a header to bypass blocking entirely, bypass the IP whitelist, or spoof a victim's IP to lock a legitimate user out of the Control Panel. IP detection now delegates to Craft's `Request::getUserIP()`, which honors forwarded headers only from proxies you've marked as trusted via `trustedHosts`/`ipHeaders` in `config/general.php`. **Sites behind Cloudflare or a reverse proxy should review the [proxy configuration guidance](README.md#how-it-works).**
+- **Fixed a front-end login block bypass.** Front-end enforcement only recognized a login when the `action` was passed as a POST body param, so a blocked IP could keep attempting logins by targeting the `/actions/users/login` path or query-string form instead. Enforcement now inspects the resolved action, which is invariant across all invocation forms.
+- **Bounded database writes from blocked IPs.** A blocked IP that kept hitting the login endpoint previously caused one login-attempt row (plus a re-save of the block row) to be written per request, which an attacker could use to flood the database. Writes for an already-blocked IP are now throttled to at most once per 60 seconds; the 403 block is still returned on every request.
 
 ## [1.0.5] - 2026-06-09
 
