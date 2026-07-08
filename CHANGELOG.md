@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-07-08
+
+> **Breaking (proxied sites only):** client IP detection now respects Craft's trusted-proxy configuration instead of unconditionally trusting forwarding headers. If your site runs behind Cloudflare, a load balancer, or another reverse proxy, configure `trustedHosts`/`ipHeaders` in `config/general.php` (see [proxy configuration guidance](README.md#how-it-works)) — otherwise all login attempts are attributed to the proxy's IP. Sites with direct connections are unaffected.
+
 ### Security
 
 - **Fixed IP spoofing in client IP detection.** `ProtectionService::getClientIp()` previously trusted the `CF-Connecting-IP`, `X-Forwarded-For`, and `X-Real-IP` request headers unconditionally and used the left-most value, which is client-controlled. This let an attacker rotate a header to bypass blocking entirely, bypass the IP whitelist, or spoof a victim's IP to lock a legitimate user out of the Control Panel. IP detection now delegates to Craft's `Request::getUserIP()`, which honors forwarded headers only from proxies you've marked as trusted via `trustedHosts`/`ipHeaders` in `config/general.php`. **Sites behind Cloudflare or a reverse proxy should review the [proxy configuration guidance](README.md#how-it-works).**
@@ -68,7 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Proxy-aware IP detection (Cloudflare, X-Forwarded-For, X-Real-IP)
 - Environment variable support for all settings using `$ENV_VAR` syntax
 
-[Unreleased]: https://github.com/johnfmorton/craft-login-lockdown/compare/v1.0.5...HEAD
+[Unreleased]: https://github.com/johnfmorton/craft-login-lockdown/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/johnfmorton/craft-login-lockdown/compare/v1.0.5...v2.0.0
 [1.0.5]: https://github.com/johnfmorton/craft-login-lockdown/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/johnfmorton/craft-login-lockdown/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/johnfmorton/craft-login-lockdown/compare/v1.0.2...v1.0.3
