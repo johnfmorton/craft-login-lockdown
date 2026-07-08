@@ -12,11 +12,21 @@ Login Lockdown is a Craft CMS 5 plugin that protects your login forms from brute
 
 **Note:** Both Control Panel and front-end login forms are protected by default. Front-end protection can be disabled in the settings if desired.
 
-The plugin is proxy-aware and correctly identifies client IPs behind Cloudflare, load balancers, and reverse proxies by checking headers in this order:
-- `CF-Connecting-IP` (Cloudflare)
-- `X-Forwarded-For` (standard proxy header)
-- `X-Real-IP` (nginx proxy header)
-- `REMOTE_ADDR` (direct connection)
+The plugin identifies the client IP using Craft's built-in request handling, which resolves the real client IP according to your site's **trusted-proxy configuration**. This is deliberately *not* a matter of blindly trusting `X-Forwarded-For`/`CF-Connecting-IP`: a forwarded header is honored only when the request actually came from a proxy you've marked as trusted, and the forwarded chain is walked so a client cannot spoof its own address.
+
+**If your site sits behind Cloudflare, a load balancer, or another reverse proxy, configure the trusted proxy in `config/general.php`** so the correct IP is used:
+
+```php
+use craft\config\GeneralConfig;
+
+return GeneralConfig::create()
+    // Only trust forwarding headers from your proxy's IP range(s):
+    ->trustedHosts(['10.0.0.0/8', '172.16.0.0/12'])
+    // Cloudflare users: honor CF-Connecting-IP (in addition to X-Forwarded-For):
+    ->ipHeaders(['CF-Connecting-IP', 'X-Forwarded-For']);
+```
+
+Without this, Craft falls back to the direct connection IP (`REMOTE_ADDR`), which is the safe default. **Do not** configure the plugin to trust raw forwarded headers from every client — that would let an attacker rotate a header to bypass blocking, slip past the whitelist, or spoof a victim's IP to lock a legitimate user out.
 
 ## Installation
 
@@ -301,12 +311,21 @@ If you've accidentally blocked yourself:
 2. **Via database**: Delete your IP from the `loginlockdown_blocked_ips` table
 3. **Disable plugin**: Rename the plugin folder temporarily to disable it
 
-### Blocks aren't working behind a proxy
+### Blocks aren't working behind a proxy (all attempts recorded as one IP)
 
-Ensure your proxy is sending the correct headers:
-- For Cloudflare: The `CF-Connecting-IP` header should be present
-- For nginx: Configure `proxy_set_header X-Real-IP $remote_addr;`
-- For load balancers: Ensure `X-Forwarded-For` is being passed
+If every attempt is recorded against your proxy's IP instead of the real client IP, Craft isn't being told to trust your proxy's forwarding headers. Configure it in `config/general.php`:
+
+1. Make sure your proxy forwards the client IP:
+   - For Cloudflare: the `CF-Connecting-IP` header is sent automatically
+   - For nginx: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`
+   - For load balancers: ensure `X-Forwarded-For` is passed
+2. Tell Craft which proxy to trust and which header to read (see [How It Works](#how-it-works) for a full example):
+   ```php
+   ->trustedHosts(['10.0.0.0/8'])          // your proxy's IP range(s)
+   ->ipHeaders(['CF-Connecting-IP', 'X-Forwarded-For'])
+   ```
+
+Trusting a header without restricting `trustedHosts` to your proxy is a security risk — clients could then spoof their IP.
 
 ### Notifications aren't sending
 

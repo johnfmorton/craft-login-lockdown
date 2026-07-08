@@ -350,34 +350,24 @@ class ProtectionService extends Component
     /**
      * Get the client's IP address (proxy-aware)
      *
+     * Delegates to Craft's request component, which resolves the real client IP
+     * using the site's configured trusted-proxy settings (`trustedHosts`,
+     * `ipHeaders`, `secureHeaders`). Forwarded headers such as `X-Forwarded-For`
+     * and `CF-Connecting-IP` are honored *only* when they originate from a
+     * trusted proxy, and the forwarded chain is walked from the right so the
+     * left-most, client-injected value cannot be spoofed.
+     *
+     * Do NOT trust raw forwarded headers here: doing so lets an attacker rotate
+     * a header to bypass blocking/whitelisting, or spoof a victim's IP to lock a
+     * legitimate user out. Sites behind Cloudflare or another reverse proxy
+     * should configure `trustedHosts`/`ipHeaders` in `config/general.php` so the
+     * correct header is honored securely.
+     *
      * @return string The client IP address
      */
     public function getClientIp(): string
     {
-        $request = Craft::$app->getRequest();
-
-        // Check Cloudflare header first
-        $ip = $request->getHeaders()->get('CF-Connecting-IP');
-        if ($ip) {
-            return $ip;
-        }
-
-        // Check X-Forwarded-For
-        $forwardedFor = $request->getHeaders()->get('X-Forwarded-For');
-        if ($forwardedFor) {
-            // Get the first IP in the list (client IP)
-            $ips = explode(',', $forwardedFor);
-            return trim($ips[0]);
-        }
-
-        // Check X-Real-IP
-        $realIp = $request->getHeaders()->get('X-Real-IP');
-        if ($realIp) {
-            return $realIp;
-        }
-
-        // Fall back to REMOTE_ADDR
-        return $request->getUserIP() ?? '0.0.0.0';
+        return Craft::$app->getRequest()->getUserIP() ?? '0.0.0.0';
     }
 
     /**

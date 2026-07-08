@@ -60,4 +60,6 @@ All settings support `$ENV_VAR` syntax. The Settings model has paired properties
 
 ### Proxy-Aware IP Detection
 
-`ProtectionService::getClientIp()` checks headers in order: `CF-Connecting-IP` → `X-Forwarded-For` → `X-Real-IP` → `REMOTE_ADDR`
+`ProtectionService::getClientIp()` delegates to `Craft::$app->getRequest()->getUserIP()`, which resolves the client IP using the site's configured trusted-proxy settings (`trustedHosts` / `ipHeaders` / `secureHeaders` in `config/general.php`). Forwarded headers (`X-Forwarded-For`, `CF-Connecting-IP`, etc.) are honored only from trusted proxies; otherwise it falls back to `REMOTE_ADDR`.
+
+**Do not** reintroduce hand-rolled header trust here (e.g. reading `CF-Connecting-IP`/`X-Forwarded-For` directly and returning the left-most value). That made the block key client-spoofable, which defeated the protection (rotate a header to bypass a block), bypassed the whitelist, and let an attacker spoof a victim's IP to lock a legitimate user out. Sites behind a proxy configure trust in `config/general.php` — the plugin must not trust headers unconditionally.

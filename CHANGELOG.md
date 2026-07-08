@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Fixed IP spoofing in client IP detection.** `ProtectionService::getClientIp()` previously trusted the `CF-Connecting-IP`, `X-Forwarded-For`, and `X-Real-IP` request headers unconditionally and used the left-most value, which is client-controlled. This let an attacker rotate a header to bypass blocking entirely, bypass the IP whitelist, or spoof a victim's IP to lock a legitimate user out of the Control Panel. IP detection now delegates to Craft's `Request::getUserIP()`, which honors forwarded headers only from proxies you've marked as trusted via `trustedHosts`/`ipHeaders` in `config/general.php`. **Sites behind Cloudflare or a reverse proxy should review the [proxy configuration guidance](README.md#how-it-works).**
+
 ## [1.0.5] - 2026-06-09
 
 ### Changed
