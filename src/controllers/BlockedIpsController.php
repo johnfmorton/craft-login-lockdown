@@ -116,11 +116,7 @@ class BlockedIpsController extends Controller
         $this->requirePostRequest();
         $this->requireCpRequest();
 
-        Craft::info('Login Lockdown: Test Pushover action called', __METHOD__);
-
         $result = LoginLockdown::$plugin->notificationService->sendTestPushoverNotification();
-
-        Craft::info('Login Lockdown: Test Pushover result: ' . json_encode($result), __METHOD__);
 
         return $this->asJson($result);
     }

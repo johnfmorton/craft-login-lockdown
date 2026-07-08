@@ -28,6 +28,7 @@ use johnfmorton\loginlockdown\services\ProtectionService;
 use yii\base\Action;
 use yii\base\ActionEvent;
 use yii\base\Event;
+use yii\web\Response;
 
 /**
  * Login Lockdown Plugin
@@ -244,46 +245,57 @@ class LoginLockdown extends Plugin
     }
 
     /**
-     * Send a 403 response for blocked IPs
+     * Send a 403 response for blocked IPs and end the request.
+     *
+     * The response is built through Yii's Response component and the request is
+     * terminated via Craft::$app->end() rather than raw echo/exit. This routes
+     * the response through the framework's send pipeline (content-type/charset
+     * formatting, security-header events, EVENT_AFTER_REQUEST) while still
+     * short-circuiting the blocked action.
      */
     private function sendBlockedResponse(): void
     {
         $settings = $this->getSettings();
         $request = Craft::$app->getRequest();
+        $response = Craft::$app->getResponse();
 
-        header('X-Login-Lockdown: BLOCKED');
+        $response->getHeaders()->set('X-Login-Lockdown', 'BLOCKED');
+        $response->setStatusCode(403);
 
-        // Check if this is an AJAX/JSON request
+        $blockMessage = $settings->getBlockMessageParsed();
+
         if ($request->getAcceptsJson() || $request->getIsAjax()) {
-            http_response_code(403);
-            header('Content-Type: application/json; charset=UTF-8');
-
-            $blockMessage = $settings->getBlockMessageParsed();
-            echo json_encode([
+            // Craft's login form submits via AJAX and displays this JSON as an error.
+            $response->format = Response::FORMAT_JSON;
+            $response->data = [
                 'success' => false,
                 'message' => $blockMessage,
                 'error' => $blockMessage,
-            ]);
-
-            exit;
+            ];
+        } else {
+            $response->format = Response::FORMAT_HTML;
+            $response->data = $this->renderBlockedHtml($blockMessage);
         }
 
-        // HTML response for regular requests
-        http_response_code(403);
-        header('Content-Type: text/html; charset=UTF-8');
+        Craft::$app->end(0, $response);
+    }
 
-        echo '<!DOCTYPE html>';
-        echo '<html><head><title>Access Denied</title>';
-        echo '<style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen-Sans,Ubuntu,Cantarell,"Helvetica Neue",sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f5f5f5;}';
-        echo '.message{text-align:center;padding:40px;background:white;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);max-width:500px;}';
-        echo 'h1{color:#dc2626;margin:0 0 16px;}p{color:#666;margin:0;line-height:1.6;}</style></head>';
-        $blockMessage = $settings->getBlockMessageParsed();
-        echo '<body><div class="message">';
-        echo '<h1>Access Denied</h1>';
-        echo '<p>' . htmlspecialchars($blockMessage, ENT_QUOTES, 'UTF-8') . '</p>';
-        echo '</div></body></html>';
+    /**
+     * Build the styled HTML page shown to blocked IPs on non-AJAX requests.
+     */
+    private function renderBlockedHtml(string $blockMessage): string
+    {
+        $safeMessage = htmlspecialchars($blockMessage, ENT_QUOTES, 'UTF-8');
 
-        exit;
+        return '<!DOCTYPE html>'
+            . '<html><head><title>Access Denied</title>'
+            . '<style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen-Sans,Ubuntu,Cantarell,"Helvetica Neue",sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f5f5f5;}'
+            . '.message{text-align:center;padding:40px;background:white;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.1);max-width:500px;}'
+            . 'h1{color:#dc2626;margin:0 0 16px;}p{color:#666;margin:0;line-height:1.6;}</style></head>'
+            . '<body><div class="message">'
+            . '<h1>Access Denied</h1>'
+            . '<p>' . $safeMessage . '</p>'
+            . '</div></body></html>';
     }
 
     /**

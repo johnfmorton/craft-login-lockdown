@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed a front-end login block bypass.** Front-end enforcement only recognized a login when the `action` was passed as a POST body param, so a blocked IP could keep attempting logins by targeting the `/actions/users/login` path or query-string form instead. Enforcement now inspects the resolved action, which is invariant across all invocation forms.
 - **Bounded database writes from blocked IPs.** A blocked IP that kept hitting the login endpoint previously caused one login-attempt row (plus a re-save of the block row) to be written per request, which an attacker could use to flood the database. Writes for an already-blocked IP are now throttled to at most once per 60 seconds; the 403 block is still returned on every request.
 
+### Changed
+
+- The block response for blocked IPs is now emitted through Craft's response pipeline (via `Craft::$app->end()`) instead of raw `echo`/`exit`, so framework content-type/charset handling, security-header events, and end-of-request cleanup all apply. The response contract (JSON `{success, message, error}` for AJAX, styled HTML otherwise, `X-Login-Lockdown` header, HTTP 403) is unchanged.
+- Removed leftover debug logging from the Pushover test action and notification service.
+
 ## [1.0.5] - 2026-06-09
 
 ### Changed

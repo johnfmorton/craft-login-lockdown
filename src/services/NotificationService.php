@@ -117,9 +117,6 @@ class NotificationService extends Component
     {
         $settings = LoginLockdown::$plugin->getSettings();
 
-        Craft::info('Login Lockdown: Test Pushover - pushoverEnabled raw: ' . var_export($settings->pushoverEnabled, true), __METHOD__);
-        Craft::info('Login Lockdown: Test Pushover - pushoverEnabled parsed: ' . var_export($settings->getPushoverEnabledParsed(), true), __METHOD__);
-
         if (!$settings->getPushoverEnabledParsed()) {
             return [
                 'success' => false,
