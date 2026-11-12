@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-12
+
+### Added
+
+- **Craft CMS 6 support.** Login Lockdown now runs on Craft 6 (beta) as well as Craft 5.9.18+, from the same release, through Craft's Yii2 adapter, which it suggests rather than requires so Craft 5 projects are unaffected.
+- On Craft 6, blocked IPs are refused by Laravel middleware on Craft's control panel and site routes. Craft 6 handles logins in Laravel routes, which never fire the Yii `EVENT_BEFORE_ACTION` that enforces blocks on Craft 5, so without this a blocked IP could still log in. It covers the password and passkey login actions and returns the same 403 JSON or HTML response as on Craft 5.
+- On Craft 6, the client IP comes from Laravel's request, which honors forwarded headers only from proxies trusted in `bootstrap/app.php`. (The adapter's legacy request would accept a client-supplied `Client-IP`.) The unconfigured-proxy warning from 2.0.1 works on Craft 6 too, and the README's Cloudflare recipe includes Craft 6's `trustProxies` setting.
+- README: a comparison of Craft 5 and Craft 6's built-in login protection with what Login Lockdown adds, and a Craft CMS 6 section (requirements, install, `config/craft/` config file, `craft:login-lockdown:*` Artisan commands, trusted proxies).
+
+### Changed
+
+- The rules for refusing a login from a blocked IP now live in one method, `LoginLockdown::refuseBlockedLoginRequest()`, shared by the Craft 5 and Craft 6 paths. Behavior on Craft 5 is unchanged, except that GET requests no longer query the blocks table.
+- Added `craftcms/ecs` and `phpstan/phpstan` to the dev dependencies so `composer run check-cs` and `composer run phpstan` work.
+
 ## [2.0.1] - 2026-11-12
 
 ### Security

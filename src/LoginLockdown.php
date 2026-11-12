@@ -22,6 +22,7 @@ use craft\controllers\UsersController;
 use craft\events\LoginFailureEvent;
 use craft\events\RegisterUrlRulesEvent;
 use craft\web\UrlManager;
+use johnfmorton\loginlockdown\http\BlockedIpMiddleware;
 use johnfmorton\loginlockdown\models\Settings;
 use johnfmorton\loginlockdown\services\NotificationService;
 use johnfmorton\loginlockdown\services\ProtectionService;
@@ -90,8 +91,14 @@ class LoginLockdown extends Plugin
             // Register failed login handler
             $this->registerFailedLoginHandler();
 
-            // Register CP access blocking
-            $this->registerCpAccessBlocking();
+            // Register blocking of login attempts from blocked IPs. Craft 6
+            // handles logins in Laravel routes, which never fire Yii's
+            // EVENT_BEFORE_ACTION, so it gets route middleware instead.
+            if (self::isCraft6()) {
+                BlockedIpMiddleware::register();
+            } else {
+                $this->registerCpAccessBlocking();
+            }
         }
 
         Craft::info('Login Lockdown plugin initialized', __METHOD__);
@@ -182,61 +189,22 @@ class LoginLockdown extends Plugin
                     return;
                 }
 
-                $isCpRequest = $request->getIsCpRequest();
-                $settings = $this->getSettings();
+                // Is this a front-end login attempt? Inspect the *resolved* action
+                // rather than only the `action` body param: Craft accepts the action
+                // via the body param, the query string, or the `/actions/users/login`
+                // path, and only the resolved action id is invariant across all of
+                // those forms. Trusting the body param alone let a blocked IP keep
+                // attempting front-end logins by switching to the path/query form.
+                $isFrontEndLogin = $event->action->getUniqueId() === 'users/login';
 
-                // Check if this is a front-end login attempt (only if setting enabled).
-                // Inspect the *resolved* action rather than only the `action` body
-                // param: Craft accepts the action via the body param, the query
-                // string, or the `/actions/users/login` path, and only the resolved
-                // action id is invariant across all of those forms. Trusting the body
-                // param alone let a blocked IP keep attempting front-end logins by
-                // switching to the path/query form.
-                $isFrontEndLogin = false;
-                if (!$isCpRequest && $request->getIsPost() && $settings->getProtectFrontEndLoginParsed()) {
-                    if ($event->action->getUniqueId() === 'users/login') {
-                        $isFrontEndLogin = true;
-                    }
-                }
-
-                // Only check CP requests or front-end login attempts
-                if (!$isCpRequest && !$isFrontEndLogin) {
+                if (!$this->refuseBlockedLoginRequest(
+                    $request->getIsCpRequest(),
+                    $isFrontEndLogin,
+                    $request->getIsPost(),
+                    $request->getBodyParam('loginName'),
+                    $request->getUserAgent(),
+                )) {
                     return;
-                }
-
-                $ipAddress = $this->protectionService->getClientIp();
-
-                // If IP is not blocked, allow everything
-                if (!$this->protectionService->isBlocked($ipAddress)) {
-                    return;
-                }
-
-                // IP is blocked - determine how to handle
-
-                // Allow already logged-in users to continue working
-                // Brute force protection prevents unauthorized access, not authenticated sessions
-                $user = Craft::$app->getUser()->getIdentity();
-                if ($user) {
-                    return;
-                }
-
-                // Allow GET requests when not logged in (so they can see the login page)
-                // This applies to both CP and front-end login pages
-                if (!$request->getIsPost()) {
-                    return;
-                }
-
-                // Record this attempt and extend the block timer
-                $username = $request->getBodyParam('loginName');
-                $userAgent = $request->getUserAgent();
-
-                try {
-                    $this->protectionService->recordBlockedAttemptAndExtend($ipAddress, $username, $userAgent);
-                } catch (\Throwable $e) {
-                    Craft::error(
-                        "Login Lockdown: Error recording blocked attempt: " . $e->getMessage(),
-                        __METHOD__
-                    );
                 }
 
                 // Block login POST attempts - Craft's login form uses AJAX,
@@ -244,6 +212,68 @@ class LoginLockdown extends Plugin
                 $this->sendBlockedResponse();
             }
         );
+    }
+
+    /**
+     * Whether a request must be refused because it's a login attempt from a
+     * blocked IP. When it must, the attempt is recorded and the block extended.
+     *
+     * Shared by the Craft 5 enforcement (a Yii EVENT_BEFORE_ACTION handler) and
+     * the Craft 6 enforcement (BlockedIpMiddleware), so both apply the same
+     * rules: only POSTs to the control panel, or to a front-end login action
+     * when `protectFrontEndLogin` is on; already logged-in users always pass.
+     */
+    public function refuseBlockedLoginRequest(
+        bool $isCpRequest,
+        bool $isFrontEndLogin,
+        bool $isPost,
+        ?string $loginName,
+        ?string $userAgent,
+    ): bool {
+        $isFrontEndLogin = $isFrontEndLogin && !$isCpRequest && $this->getSettings()->getProtectFrontEndLoginParsed();
+
+        // Only check CP requests or front-end login attempts
+        if (!$isCpRequest && !$isFrontEndLogin) {
+            return false;
+        }
+
+        // Allow GET requests (so a blocked IP can still see the login page)
+        if (!$isPost) {
+            return false;
+        }
+
+        $ipAddress = $this->protectionService->getClientIp();
+
+        // If IP is not blocked, allow everything
+        if (!$this->protectionService->isBlocked($ipAddress)) {
+            return false;
+        }
+
+        // Allow already logged-in users to continue working.
+        // Brute force protection prevents unauthorized access, not authenticated sessions.
+        if (Craft::$app->getUser()->getIdentity()) {
+            return false;
+        }
+
+        // Record this attempt and extend the block timer
+        try {
+            $this->protectionService->recordBlockedAttemptAndExtend($ipAddress, $loginName, $userAgent);
+        } catch (\Throwable $e) {
+            Craft::error(
+                "Login Lockdown: Error recording blocked attempt: " . $e->getMessage(),
+                __METHOD__
+            );
+        }
+
+        return true;
+    }
+
+    /**
+     * Whether Craft CMS 6 (running this plugin through the yii2 adapter) is installed.
+     */
+    public static function isCraft6(): bool
+    {
+        return class_exists('CraftCms\\Cms\\Cms');
     }
 
     /**
@@ -285,7 +315,7 @@ class LoginLockdown extends Plugin
     /**
      * Build the styled HTML page shown to blocked IPs on non-AJAX requests.
      */
-    private function renderBlockedHtml(string $blockMessage): string
+    public function renderBlockedHtml(string $blockMessage): string
     {
         $safeMessage = htmlspecialchars($blockMessage, ENT_QUOTES, 'UTF-8');
 

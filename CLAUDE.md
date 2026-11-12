@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Login Lockdown is a Craft CMS 5 plugin that protects login forms from brute force attacks by tracking failed login attempts per IP address and temporarily blocking access after a configurable threshold.
+Login Lockdown is a Craft CMS 5 and 6 plugin that protects login forms from brute force attacks by tracking failed login attempts per IP address and temporarily blocking access after a configurable threshold.
 
-**Stack:** Craft CMS 5.8+ / PHP 8.2+
+**Stack:** Craft CMS 5.9.18+ / PHP 8.2+, or Craft CMS 6 / PHP 8.5 via the suggested `craftcms/yii2-adapter`. Craft 6 is developed and tested in `~/git/craft6plugindev` (see its `docs/porting-plugins.md`).
 
 ## Common Commands
 
@@ -44,8 +44,9 @@ src/
 1. **Failed Login Detection**: Plugin listens to `UsersController::EVENT_LOGIN_FAILURE`
 2. **Attempt Recording**: `ProtectionService::recordFailedAttempt()` stores attempt in `loginlockdown_login_attempts`
 3. **Threshold Check**: If attempts exceed `maxAttempts` within `attemptWindow`, IP is blocked
-4. **Block Enforcement**: `Application::EVENT_BEFORE_ACTION` intercepts login POST requests from blocked IPs
-5. **Notifications**: `NotificationService` sends email/Pushover alerts when IPs are blocked
+4. **Block Enforcement**: `LoginLockdown::refuseBlockedLoginRequest()` decides; it's called from `Application::EVENT_BEFORE_ACTION` on Craft 5 and from `http/BlockedIpMiddleware` (Laravel middleware on the `craft.cp` / `craft.web` route groups) on Craft 6, where logins are Laravel routes that never fire Yii's before-action event. `BlockedIpMiddleware.php` uses Laravel classes, so it's excluded from PHPStan's Craft 5 analysis.
+5. **Client IP**: `ProtectionService::getClientIp()`. Craft 5: `REMOTE_ADDR` unless `trustedHosts` lists proxy ranges (never Craft's `getUserIP()`, which trusts client headers). Craft 6: Laravel's `$request->ip()` (trusted proxies in `bootstrap/app.php`). Test spoofing with `Client-IP` / `X-Forwarded-For` headers on any change here.
+6. **Notifications**: `NotificationService` sends email/Pushover alerts when IPs are blocked
 
 ### Settings with Environment Variables
 

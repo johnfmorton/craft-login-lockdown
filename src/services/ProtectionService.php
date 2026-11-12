@@ -14,6 +14,7 @@ use Craft;
 use craft\base\Component;
 use craft\db\Query;
 use DateTime;
+use johnfmorton\loginlockdown\http\BlockedIpMiddleware;
 use johnfmorton\loginlockdown\LoginLockdown;
 use johnfmorton\loginlockdown\records\BlockedIpRecord;
 use johnfmorton\loginlockdown\records\LoginAttemptRecord;
@@ -396,10 +397,25 @@ class ProtectionService extends Component
      *   (default `X-Forwarded-For`) are walked from the right, skipping
      *   trusted proxies, and the first untrusted address is the client.
      *
+     * On Craft 6 the IP comes from Laravel's request instead (see
+     * BlockedIpMiddleware::clientIp()). The yii2 adapter's legacy request would
+     * honor a client-supplied `Client-IP` header, because Craft 6 deprecated
+     * `trustedHosts` (default `['any']`) in favor of Laravel's trusted proxies.
+     * Laravel's `ip()` only honors forwarded headers from proxies trusted in
+     * `bootstrap/app.php`, and it's what Craft 6's own login throttling uses.
+     *
      * @return string The client IP address
      */
     public function getClientIp(): string
     {
+        // Craft 6: Laravel's request, which only honors forwarded headers from
+        // proxies trusted in bootstrap/app.php (see BlockedIpMiddleware::clientIp()).
+        if (LoginLockdown::isCraft6()) {
+            $clientIp = BlockedIpMiddleware::clientIp() ?? '0.0.0.0';
+            $this->warnIfUnconfiguredProxy($clientIp);
+            return $clientIp;
+        }
+
         $request = Craft::$app->getRequest();
         $remoteIp = $request->getRemoteIP();
         if ($remoteIp === null) {

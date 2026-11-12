@@ -2,7 +2,7 @@
 	"name": "johnfmorton/login-lockdown",
 	"description": "Prevents brute force password attacks on the Craft CMS control panel by tracking failed login attempts per IP address and blocking access after a configurable threshold.",
 	"type": "craft-plugin",
-	"version": "2.0.1",
+	"version": "2.1.0",
 	"keywords": [
 		"craft",
 		"cms",
@@ -25,7 +25,10 @@
 	],
 	"require": {
 		"php": ">=8.2",
-		"craftcms/cms": "^5.9.18"
+		"craftcms/cms": "^5.9.18|^6.0.0-beta.1"
+	},
+	"suggest": {
+		"craftcms/yii2-adapter": "Required to run on Craft CMS 6."
 	},
 	"autoload": {
 		"psr-4": {
@@ -56,6 +59,8 @@
 		}
 	},
 	"require-dev": {
-		"craftcms/phpstan": "dev-main"
+		"craftcms/ecs": "dev-main",
+		"craftcms/phpstan": "dev-main",
+		"phpstan/phpstan": "^2.2"
 	}
 }

@@ -1,6 +1,25 @@
 # Login Lockdown Documentation
 
-Login Lockdown is a Craft CMS 5 plugin that protects your login forms from brute force password attacks by tracking failed login attempts per IP address and temporarily blocking access after a configurable threshold is reached.
+Login Lockdown is a Craft CMS 5 and 6 plugin that protects your login forms from brute force password attacks by tracking failed login attempts per IP address and temporarily blocking access after a configurable threshold is reached.
+
+## Login Lockdown and Craft's built-in protection
+
+Craft already slows down password guessing. Login Lockdown adds what Craft doesn't do: it blocks the *attacker*, for as long as you choose, across every username.
+
+| Protection | Craft 5.9.15+ | Craft 6 | Login Lockdown |
+|---|---|---|---|
+| Lock an **account** after repeated bad passwords | 5 in an hour → 5-minute cooldown (`maxInvalidLogins`, `cooldownDuration`) | Same | — |
+| Rate-limit login attempts per **IP** | 10 per minute (`defaultRateLimit`) | Same | — |
+| Rate-limit per **login name + IP** | — | 5 per minute | — |
+| Hide whether an account exists | Off by default (`preventUserEnumeration`) | On by default; login responses take constant time | — |
+| **Block an IP** after failed logins across *any* usernames | — | — | ✓ Threshold and window you set (default 5 in 15 minutes) |
+| **Long lockouts** that grow while the attack continues | — | — | ✓ Default 24 hours, extended on every blocked attempt |
+| Cover the whole control panel and front-end login forms | — | — | ✓ |
+| Allowlist your own IPs | — | — | ✓ |
+| See and manage blocked IPs and attempt history | — | — | ✓ Control panel screen and CLI |
+| Get told when an IP is blocked | — | — | ✓ Email and Pushover |
+
+Craft's account lockout protects the account, but an attacker can use it to lock a real user out by guessing at their username. Craft's rate limits reset within a minute, so a patient attacker or a botnet keeps going. Login Lockdown's IP blocks stop the source instead, and tell you about it.
 
 ## How It Works
 
@@ -18,7 +37,7 @@ Blocking only works if the plugin knows each visitor's real IP, and a visitor mu
 
 Forwarded headers are used only when you've told Craft which proxies to trust, and only when the request actually came from one of them. The plugin then reads your `ipHeaders` (default `X-Forwarded-For`) from the right, skipping your trusted proxies, so the first address your infrastructure didn't add is the client. (Since 2.0.1 the plugin does this itself rather than using Craft's `getUserIP()`, which would accept a client-supplied `Client-IP` or `X-Forwarded-For` under Craft's default `trustedHosts` of `['any']`.)
 
-**If your site sits behind Cloudflare, a load balancer, or another reverse proxy, configure the trusted proxy in `config/general.php`.** Otherwise every visitor is seen as the proxy's IP, and a few failed logins would block everyone. The plugin logs a warning when requests look proxied but the IP it resolves is the proxy's (see [Behind Cloudflare or another proxy](#behind-cloudflare-or-another-proxy)).
+**If your site sits behind Cloudflare, a load balancer, or another reverse proxy, configure the trusted proxy in `config/general.php`** (on Craft 6, in `bootstrap/app.php`; see [Craft CMS 6](#craft-cms-6)). Otherwise every visitor is seen as the proxy's IP, and a few failed logins would block everyone. The plugin logs a warning when requests look proxied but the IP it resolves is the proxy's (see [Behind Cloudflare or another proxy](#behind-cloudflare-or-another-proxy)).
 
 ```php
 use craft\config\GeneralConfig;
@@ -90,6 +109,22 @@ RemoteIPTrustedProxy 103.21.244.0/22
 ->ipHeaders(['CF-Connecting-IP'])
 ```
 
+**Craft 6** (`bootstrap/app.php`), if you can't change the web server. Cloudflare sends the visitor in `X-Forwarded-For`, and Laravel reads it once the edge is trusted:
+
+```php
+->withMiddleware(function (Middleware $middleware): void {
+    $middleware->trustProxies(at: [
+        // Cloudflare's ranges: https://www.cloudflare.com/ips/
+        '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22',
+        '141.101.64.0/18', '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20',
+        '197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13',
+        '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22',
+        '2400:cb00::/32', '2606:4700::/32', '2803:f800::/32', '2405:b500::/32',
+        '2405:8100::/32', '2a06:98c0::/29', '2c0f:f248::/32',
+    ]);
+})
+```
+
 Cloudflare adds ranges occasionally, so check the list now and then.
 
 For a load balancer or other reverse proxy, the idea is the same: trust only your proxy's addresses (`set_real_ip_from` / `RemoteIPTrustedProxy` / `trustedHosts`), and read the header it sets (usually `X-Forwarded-For`).
@@ -111,6 +146,29 @@ php craft plugin/install login-lockdown
 ```
 
 Or install via the Control Panel under **Settings → Plugins**.
+
+On Craft 6, see [Craft CMS 6](#craft-cms-6).
+
+## Craft CMS 6
+
+Login Lockdown runs on Craft 6 (beta) as well as Craft 5, from the same release.
+
+- **Requirements:** Craft CMS 6 on PHP 8.5, through Craft's [Yii2 adapter](https://craftcms.com/docs/6.x/extend/adapter.html). The plugin suggests `craftcms/yii2-adapter` rather than requiring it, so Craft 5 projects are unaffected. The Plugin Store and Craft's upgrade tool add the adapter for you; with Composer, require it yourself.
+- **Install:**
+  ```bash
+  composer require johnfmorton/login-lockdown craftcms/yii2-adapter
+  php artisan craft:plugin:install login-lockdown
+  ```
+- **Config file:** `config/craft/login-lockdown.php` (Craft 6 keeps its config files in `config/craft/`).
+- **CLI:** commands are Artisan commands prefixed `craft:`, for example `php artisan craft:login-lockdown:block:list` and `php artisan craft:login-lockdown:cleanup --days=7`.
+- **Enforcement:** Craft 6 handles logins in Laravel routes, so the plugin refuses blocked IPs with Laravel middleware on Craft's control panel and site routes, including the password and passkey login actions.
+- **Client IP:** taken from Laravel's request. Behind Cloudflare, a load balancer or another reverse proxy, configure [trusted proxies](https://laravel.com/docs/13.x/requests#configuring-trusted-proxies) in `bootstrap/app.php`, or every visitor is seen as the proxy:
+  ```php
+  ->withMiddleware(function (Middleware $middleware): void {
+      $middleware->trustProxies(at: ['10.0.0.0/8', '172.16.0.0/12']); // your proxy's ranges
+  })
+  ```
+  Craft's `trustedHosts` and `ipHeaders` settings are deprecated on Craft 6 and aren't used. Setting the real IP in your web server (for example nginx's `real_ip` module with Cloudflare's `CF-Connecting-IP`) works on both Craft versions.
 
 ## Configuration
 
@@ -262,7 +320,7 @@ Stores blocked IPs:
 
 ## CLI Commands
 
-The plugin provides Craft CLI commands for managing blocked IPs and cleaning up old records.
+The plugin provides Craft CLI commands for managing blocked IPs and cleaning up old records. The examples use Craft 5's `php craft login-lockdown/...` form; on Craft 6, run `php artisan craft:login-lockdown:...` instead (`/` becomes `:`), e.g. `php artisan craft:login-lockdown:block:remove 192.168.1.100`.
 
 ### Cleanup Command
 
@@ -375,7 +433,7 @@ $allBlocks = LoginLockdown::$plugin->protectionService->getBlockedIps(true);
 
 If you've accidentally blocked yourself:
 
-1. **Via CLI**: `php craft login-lockdown/block/remove YOUR_IP_ADDRESS`
+1. **Via CLI**: `php craft login-lockdown/block/remove YOUR_IP_ADDRESS` (Craft 6: `php artisan craft:login-lockdown:block:remove YOUR_IP_ADDRESS`)
 2. **Via database**: Delete your IP from the `loginlockdown_blocked_ips` table
 3. **Disable plugin**: Rename the plugin folder temporarily to disable it
 
