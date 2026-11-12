@@ -17,6 +17,7 @@ use DateTime;
 use johnfmorton\loginlockdown\LoginLockdown;
 use johnfmorton\loginlockdown\records\BlockedIpRecord;
 use johnfmorton\loginlockdown\records\LoginAttemptRecord;
+use yii\validators\IpValidator;
 
 /**
  * Protection Service
@@ -376,26 +377,160 @@ class ProtectionService extends Component
     }
 
     /**
-     * Get the client's IP address (proxy-aware)
+     * Get the client's IP address.
      *
-     * Delegates to Craft's request component, which resolves the real client IP
-     * using the site's configured trusted-proxy settings (`trustedHosts`,
-     * `ipHeaders`, `secureHeaders`). Forwarded headers such as `X-Forwarded-For`
-     * and `CF-Connecting-IP` are honored *only* when they originate from a
-     * trusted proxy, and the forwarded chain is walked from the right so the
-     * left-most, client-injected value cannot be spoofed.
+     * Forwarded headers are only honored when the site has explicitly told Craft
+     * which proxies to trust, and the request actually came from one of them.
+     * Craft's own `getUserIP()` can't be used for this: it returns the first
+     * valid address from any of `Client-IP`, `X-Forwarded-For`, `X-Forwarded`,
+     * `X-Cluster-Client-IP`, `Forwarded-For` or `Forwarded`, taking the
+     * left-most (client-controlled) entry, and only `X-Forwarded-For` is
+     * filtered by `trustedHosts`, which defaults to `['any']`. An attacker
+     * could rotate any of those headers to dodge blocks, or send a victim's IP
+     * to lock them out.
      *
-     * Do NOT trust raw forwarded headers here: doing so lets an attacker rotate
-     * a header to bypass blocking/whitelisting, or spoof a victim's IP to lock a
-     * legitimate user out. Sites behind Cloudflare or another reverse proxy
-     * should configure `trustedHosts`/`ipHeaders` in `config/general.php` so the
-     * correct header is honored securely.
+     * - `trustedHosts` unset or `['any']` (Craft's default): the direct
+     *   connection address (`REMOTE_ADDR`). Client headers are ignored.
+     * - `trustedHosts` set to proxy ranges (e.g. Cloudflare's): when the
+     *   connection comes from one of those ranges, the site's `ipHeaders`
+     *   (default `X-Forwarded-For`) are walked from the right, skipping
+     *   trusted proxies, and the first untrusted address is the client.
      *
      * @return string The client IP address
      */
     public function getClientIp(): string
     {
-        return Craft::$app->getRequest()->getUserIP() ?? '0.0.0.0';
+        $request = Craft::$app->getRequest();
+        $remoteIp = $request->getRemoteIP();
+        if ($remoteIp === null) {
+            return '0.0.0.0';
+        }
+
+        $generalConfig = Craft::$app->getConfig()->getGeneral();
+        $trustedRanges = self::trustedProxyRanges($generalConfig->trustedHosts);
+
+        if ($trustedRanges === [] || !self::ipInRanges($remoteIp, $trustedRanges)) {
+            if ($trustedRanges === []) {
+                $this->warnIfUnconfiguredProxy($remoteIp);
+            }
+            return $remoteIp;
+        }
+
+        foreach ($generalConfig->ipHeaders ?? ['X-Forwarded-For'] as $headerName) {
+            $value = $request->getHeaders()->get($headerName);
+            if (!is_string($value) || trim($value) === '') {
+                continue;
+            }
+
+            // Walk from the right: proxies append, so the right-most entries
+            // were added by our own (trusted) infrastructure.
+            $clientIp = null;
+            $ips = preg_split('/\s*,\s*/', trim($value), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            foreach (array_reverse($ips) as $ip) {
+                if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
+                    break;
+                }
+                $clientIp = $ip;
+                if (!self::ipInRanges($ip, $trustedRanges)) {
+                    break;
+                }
+            }
+
+            if ($clientIp !== null) {
+                return $clientIp;
+            }
+        }
+
+        return $remoteIp;
+    }
+
+    /**
+     * The proxy ranges a site has explicitly trusted, or `[]` when it hasn't:
+     * Craft's default `trustedHosts` of `['any']` trusts every client, so it
+     * can't be used to decide whether forwarded headers are genuine.
+     *
+     * @param array<int|string, string|string[]> $trustedHosts
+     * @return string[]
+     */
+    private static function trustedProxyRanges(array $trustedHosts): array
+    {
+        $ranges = [];
+        foreach ($trustedHosts as $key => $value) {
+            // Entries are either 'cidr' or 'cidr' => [headers].
+            $range = is_array($value) ? $key : $value;
+            if (is_string($range) && $range !== '') {
+                $ranges[] = $range;
+            }
+        }
+
+        return in_array('any', $ranges, true) ? [] : $ranges;
+    }
+
+    /**
+     * @param string[] $ranges
+     */
+    private static function ipInRanges(string $ip, array $ranges): bool
+    {
+        $validator = new IpValidator(['ranges' => $ranges]);
+        return $validator->validate($ip);
+    }
+
+    /**
+     * Log a warning (at most once an hour) when the request looks proxied but the
+     * resolved client IP is the proxy's own: every visitor then shares that
+     * IP, so a few failed logins would block all of them.
+     *
+     * Two signs, chosen so a correctly configured site stays quiet:
+     * - A CDN client header (`CF-Connecting-IP` from Cloudflare,
+     *   `True-Client-IP` from Akamai/Cloudflare Enterprise) holding an IP
+     *   other than the resolved one. When the web server or Craft is set up
+     *   for the CDN, the two match.
+     * - A private or reserved resolved IP plus an `X-Forwarded-For` header:
+     *   a load balancer or reverse proxy on an internal network.
+     */
+    private function warnIfUnconfiguredProxy(string $clientIp): void
+    {
+        static $warned = false;
+        if ($warned) {
+            return;
+        }
+
+        $headers = Craft::$app->getRequest()->getHeaders();
+        $reason = null;
+
+        foreach (['CF-Connecting-IP', 'True-Client-IP'] as $cdnHeader) {
+            $value = trim((string)$headers->get($cdnHeader, ''));
+            if ($value !== '' && filter_var($value, FILTER_VALIDATE_IP) !== false && $value !== $clientIp) {
+                $reason = "a {$cdnHeader} header says the visitor is {$value}, which looks like a CDN such as Cloudflare";
+                break;
+            }
+        }
+
+        if ($reason === null) {
+            $isPrivate = filter_var($clientIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false;
+            if ($isPrivate && trim((string)$headers->get('X-Forwarded-For', '')) !== '') {
+                $reason = 'it has an X-Forwarded-For header, which looks like a reverse proxy or load balancer';
+            }
+        }
+
+        if ($reason === null) {
+            return;
+        }
+
+        $warned = true;
+
+        // Every request from a misconfigured site would qualify, so log at most
+        // once an hour rather than filling the logs.
+        if (!Craft::$app->getCache()->add('loginlockdown:proxy-warning', true, 3600)) {
+            return;
+        }
+
+        Craft::warning(
+            "Login Lockdown: requests appear to come from {$clientIp}, but {$reason}. "
+            . 'Every visitor may be treated as that one IP, so a few failed logins could block everyone. '
+            . 'Configure your trusted proxy: see "Behind Cloudflare or another proxy" in the plugin README.',
+            __METHOD__
+        );
     }
 
     /**

@@ -12,9 +12,13 @@ Login Lockdown is a Craft CMS 5 plugin that protects your login forms from brute
 
 **Note:** Both Control Panel and front-end login forms are protected by default. Front-end protection can be disabled in the settings if desired.
 
-The plugin identifies the client IP using Craft's built-in request handling, which resolves the real client IP according to your site's **trusted-proxy configuration**. This is deliberately *not* a matter of blindly trusting `X-Forwarded-For`/`CF-Connecting-IP`: a forwarded header is honored only when the request actually came from a proxy you've marked as trusted, and the forwarded chain is walked so a client cannot spoof its own address.
+### How the client IP is determined
 
-**If your site sits behind Cloudflare, a load balancer, or another reverse proxy, configure the trusted proxy in `config/general.php`** so the correct IP is used:
+Blocking only works if the plugin knows each visitor's real IP, and a visitor must not be able to fake it. By default the plugin uses the **direct connection address** (`REMOTE_ADDR`) and ignores every forwarded header a client could send.
+
+Forwarded headers are used only when you've told Craft which proxies to trust, and only when the request actually came from one of them. The plugin then reads your `ipHeaders` (default `X-Forwarded-For`) from the right, skipping your trusted proxies, so the first address your infrastructure didn't add is the client. (Since 2.0.1 the plugin does this itself rather than using Craft's `getUserIP()`, which would accept a client-supplied `Client-IP` or `X-Forwarded-For` under Craft's default `trustedHosts` of `['any']`.)
+
+**If your site sits behind Cloudflare, a load balancer, or another reverse proxy, configure the trusted proxy in `config/general.php`.** Otherwise every visitor is seen as the proxy's IP, and a few failed logins would block everyone. The plugin logs a warning when requests look proxied but the IP it resolves is the proxy's (see [Behind Cloudflare or another proxy](#behind-cloudflare-or-another-proxy)).
 
 ```php
 use craft\config\GeneralConfig;
@@ -26,7 +30,71 @@ return GeneralConfig::create()
     ->ipHeaders(['CF-Connecting-IP', 'X-Forwarded-For']);
 ```
 
-Without this, Craft falls back to the direct connection IP (`REMOTE_ADDR`), which is the safe default. **Do not** configure the plugin to trust raw forwarded headers from every client — that would let an attacker rotate a header to bypass blocking, slip past the whitelist, or spoof a victim's IP to lock a legitimate user out.
+Leaving `trustedHosts` at Craft's default (`['any']`) means "no trusted proxies" to this plugin: it uses the direct connection IP, the safe default. Only list headers in `ipHeaders` that your proxy sets or overwrites. If a header passes through your proxy unchanged (some proxies forward `Client-IP` as-is), a client could still put any IP in it.
+
+### Behind Cloudflare or another proxy
+
+If Cloudflare proxies your site (the orange cloud in DNS), the connection your server sees comes from a Cloudflare edge server, not the visitor. Pick **one** of these so Login Lockdown, and Craft, see the real visitor IP. The web server option is simplest, because it fixes the IP for everything on the site.
+
+**nginx** (for example in Forge's site configuration, inside the `server` block):
+
+```nginx
+# Trust CF-Connecting-IP only from Cloudflare's edge: https://www.cloudflare.com/ips/
+set_real_ip_from 173.245.48.0/20;
+set_real_ip_from 103.21.244.0/22;
+set_real_ip_from 103.22.200.0/22;
+set_real_ip_from 103.31.4.0/22;
+set_real_ip_from 141.101.64.0/18;
+set_real_ip_from 108.162.192.0/18;
+set_real_ip_from 190.93.240.0/20;
+set_real_ip_from 188.114.96.0/20;
+set_real_ip_from 197.234.240.0/22;
+set_real_ip_from 198.41.128.0/17;
+set_real_ip_from 162.158.0.0/15;
+set_real_ip_from 104.16.0.0/13;
+set_real_ip_from 104.24.0.0/14;
+set_real_ip_from 172.64.0.0/13;
+set_real_ip_from 131.0.72.0/22;
+set_real_ip_from 2400:cb00::/32;
+set_real_ip_from 2606:4700::/32;
+set_real_ip_from 2803:f800::/32;
+set_real_ip_from 2405:b500::/32;
+set_real_ip_from 2405:8100::/32;
+set_real_ip_from 2a06:98c0::/29;
+set_real_ip_from 2c0f:f248::/32;
+real_ip_header CF-Connecting-IP;
+```
+
+**Apache** (`mod_remoteip`):
+
+```apache
+RemoteIPHeader CF-Connecting-IP
+# One line per range from https://www.cloudflare.com/ips/
+RemoteIPTrustedProxy 173.245.48.0/20
+RemoteIPTrustedProxy 103.21.244.0/22
+# ...and the rest of the list
+```
+
+**Craft 5** (`config/general.php`), if you can't change the web server:
+
+```php
+->trustedHosts([
+    // Cloudflare's ranges: https://www.cloudflare.com/ips/
+    '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22',
+    '141.101.64.0/18', '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20',
+    '197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13',
+    '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22',
+    '2400:cb00::/32', '2606:4700::/32', '2803:f800::/32', '2405:b500::/32',
+    '2405:8100::/32', '2a06:98c0::/29', '2c0f:f248::/32',
+])
+->ipHeaders(['CF-Connecting-IP'])
+```
+
+Cloudflare adds ranges occasionally, so check the list now and then.
+
+For a load balancer or other reverse proxy, the idea is the same: trust only your proxy's addresses (`set_real_ip_from` / `RemoteIPTrustedProxy` / `trustedHosts`), and read the header it sets (usually `X-Forwarded-For`).
+
+**Check it worked:** fail a login on purpose, then look at the attempts list under **Login Lockdown** in the control panel. It should show your own IP, not a proxy's. The plugin also logs a warning ("Every visitor may be treated as that one IP") when it sees a Cloudflare header or a forwarded private address that doesn't match the IP it resolved.
 
 ## Installation
 
@@ -325,7 +393,7 @@ If every attempt is recorded against your proxy's IP instead of the real client 
    ->ipHeaders(['CF-Connecting-IP', 'X-Forwarded-For'])
    ```
 
-Trusting a header without restricting `trustedHosts` to your proxy is a security risk — clients could then spoof their IP.
+Forwarded headers are ignored unless `trustedHosts` is restricted to your proxy's ranges; Craft's default `['any']` doesn't count. The plugin logs a warning ("Every visitor may be treated as that one IP") when it detects this. For Cloudflare, see [Behind Cloudflare or another proxy](#behind-cloudflare-or-another-proxy).
 
 ### Notifications aren't sending
 

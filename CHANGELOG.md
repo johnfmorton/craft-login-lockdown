@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-11-12
+
+### Security
+
+- **Client IPs can no longer be spoofed with request headers.** The plugin used Craft's `getUserIP()`, which returns the first valid address from any of `Client-IP`, `X-Forwarded-For`, `X-Forwarded`, `X-Cluster-Client-IP`, `Forwarded-For` or `Forwarded`, taking the left-most (client-controlled) value. Only `X-Forwarded-For` is filtered by `trustedHosts`, and Craft's default `trustedHosts` of `['any']` trusts it anyway. On a site with no proxy in front, an attacker could send a different `Client-IP` with every attempt and never be blocked, or send a victim's IP to lock them out. The plugin now uses the direct connection address unless `trustedHosts` lists specific proxy ranges, and then reads `ipHeaders` (default `X-Forwarded-For`) only from those proxies, right to left.
+
+> **Proxied sites:** if your site is behind Cloudflare, a load balancer, or another reverse proxy and you haven't set `trustedHosts` to its ranges, every visitor will now be seen as the proxy's IP, so failed logins from anyone will block everyone. Before upgrading, configure the real client IP in your web server or Craft; see [Behind Cloudflare or another proxy](README.md#behind-cloudflare-or-another-proxy) for copy-paste nginx, Apache and Craft settings. The plugin logs a warning when a request carries a Cloudflare (`CF-Connecting-IP`) or Akamai (`True-Client-IP`) header that doesn't match the resolved IP, or a forwarded private address (at most once an hour).
+
+### Fixed
+
+- PHPStan 2.3 findings: dropped an always-true `instanceof Action` check, and documented why the null-safe `$event->user?->username` is needed.
+
 ## [2.0.0] - 2026-07-08
 
 > **Breaking (proxied sites only):** client IP detection now respects Craft's trusted-proxy configuration instead of unconditionally trusting forwarding headers. If your site runs behind Cloudflare, a load balancer, or another reverse proxy, configure `trustedHosts`/`ipHeaders` in `config/general.php` (see [proxy configuration guidance](README.md#how-it-works)) — otherwise all login attempts are attributed to the proxy's IP. Sites with direct connections are unaffected.

@@ -25,7 +25,6 @@ use craft\web\UrlManager;
 use johnfmorton\loginlockdown\models\Settings;
 use johnfmorton\loginlockdown\services\NotificationService;
 use johnfmorton\loginlockdown\services\ProtectionService;
-use yii\base\Action;
 use yii\base\ActionEvent;
 use yii\base\Event;
 use yii\web\Response;
@@ -146,6 +145,10 @@ class LoginLockdown extends Plugin
                 }
 
                 $ipAddress = $this->protectionService->getClientIp();
+                // `user` is null when the login name matches no account (Craft 6 passes
+                // null through the yii2 adapter), so keep the null-safe access even
+                // though Craft 5's types say it's never null.
+                // @phpstan-ignore nullsafe.neverNull
                 $username = $event->user?->username ?? Craft::$app->getRequest()->getBodyParam('loginName');
                 $userAgent = Craft::$app->getRequest()->getUserAgent();
 
@@ -191,8 +194,7 @@ class LoginLockdown extends Plugin
                 // switching to the path/query form.
                 $isFrontEndLogin = false;
                 if (!$isCpRequest && $request->getIsPost() && $settings->getProtectFrontEndLoginParsed()) {
-                    $action = $event->action;
-                    if ($action instanceof Action && $action->getUniqueId() === 'users/login') {
+                    if ($event->action->getUniqueId() === 'users/login') {
                         $isFrontEndLogin = true;
                     }
                 }
