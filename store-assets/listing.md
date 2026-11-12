@@ -4,14 +4,9 @@ Copy for the Login Lockdown listing in Craft Console.
 
 The Plugin Store doesn't read this file. Update it with each release, then paste the changed sections into Craft Console by hand.
 
-**Written for:** 2.1.0. **Live listing last checked:** 2026-11-12 (showing 2.0.0, compatibility "Craft 5", 29 active installs).
+**Written for:** 2.1.0. **Live listing last checked:** 2026-11-12, after John pasted the 2.1.0 copy (showing 2.1.0, compatibility "Craft 5, Craft 6", 29 active installs). The long description matches this file.
 
-**Changed since the live copy:**
-- A new opening paragraph.
-- A new "Login Lockdown and Craft's built-in protection" section with a comparison table.
-- A new "Craft 5 and Craft 6" section.
-- A note on client IPs behind proxies, after "How It Works".
-- The rest is the live text with its Markdown formatting reconstructed, since the store page was read as plain text, so check it against Craft Console before pasting over it.
+**Changed since the live copy:** nothing.
 
 ## Short description
 
@@ -31,7 +26,7 @@ Everything below the rule is the Markdown for the long description field.
 
 ---
 
-Login Lockdown stops brute force password attacks at the source. It tracks failed logins per IP address and blocks an IP that keeps failing from logging in to the control panel and your front-end login forms, for as long as you choose. You're notified by email or Pushover when it happens.
+_Login Lockdown_ stops brute force password attacks at the source. It tracks failed logins per IP address and blocks an IP that keeps failing from logging in to the control panel and your front-end login forms, for as long as you choose. You're notified by email or Pushover when it happens.
 
 ## Login Lockdown and Craft's built-in protection
 
